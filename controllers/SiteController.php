@@ -6,7 +6,7 @@
     {
         public function actionIndex()
         {
-            return 'Сайт автосалона';
+            return 'Сайт автоцентра';
         }
     }
 ?>
