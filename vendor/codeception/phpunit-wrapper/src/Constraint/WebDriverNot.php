@@ -2,8 +2,9 @@
 namespace Codeception\PHPUnit\Constraint;
 
 use SebastianBergmann\Comparator\ComparisonFailure;
+use Codeception\Util\Locator;
 
-class CrawlerNot extends Crawler
+class WebDriverNot extends WebDriver
 {
     protected function matches($nodes)
     {
@@ -12,20 +13,20 @@ class CrawlerNot extends Crawler
 
     protected function fail($nodes, $selector, ComparisonFailure $comparisonFailure = null)
     {
+        $selectorString = Locator::humanReadableString($selector);
         if (!$this->string) {
-            throw new \PHPUnit_Framework_ExpectationFailedException(
-                "Element '$selector' was found",
+            throw new \PHPUnit\Framework\ExpectationFailedException(
+                "Element $selectorString was found",
                 $comparisonFailure
             );
         }
-        /** @var $nodes DomCrawler  * */
 
-        $output = "There was '$selector' element";
-        $output .= $this->uriMessage('on page');
+        $output = "There was $selectorString element";
+        $output .= $this->uriMessage("on page");
         $output .= $this->nodesList($nodes, $this->string);
         $output .= "\ncontaining '{$this->string}'";
 
-        throw new \PHPUnit_Framework_ExpectationFailedException(
+        throw new \PHPUnit\Framework\ExpectationFailedException(
             $output,
             $comparisonFailure
         );
