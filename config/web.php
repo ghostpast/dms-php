@@ -1,6 +1,6 @@
 <?php
     return [
-        'id' => 'carshowroom',
+        'id' => 'dms-plus',
         'basePath' => realpath(__DIR__ . '/../'),
         'components' => [
             'request' => [

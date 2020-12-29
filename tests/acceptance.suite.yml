@@ -8,5 +8,5 @@ class_name: AcceptanceTester
 modules:
     enabled:
         - PhpBrowser:
-            url: http://car-showroom.ru
+            url: http://dms-plus.one
         - \Helper\Acceptance
