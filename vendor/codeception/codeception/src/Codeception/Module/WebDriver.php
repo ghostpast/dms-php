@@ -1,5 +1,4 @@
 <?php
-
 namespace Codeception\Module;
 
 use Codeception\Coverage\Subscriber\LocalServer;
@@ -25,8 +24,8 @@ use Codeception\PHPUnit\Constraint\WebDriverNot as WebDriverConstraintNot;
 use Codeception\Test\Descriptor;
 use Codeception\Test\Interfaces\ScenarioDriven;
 use Codeception\TestInterface;
-use Codeception\Util\ActionSequence;
 use Codeception\Util\Debug;
+use Codeception\Util\ActionSequence;
 use Codeception\Util\Locator;
 use Codeception\Util\Uri;
 use Facebook\WebDriver\Cookie;
@@ -38,8 +37,8 @@ use Facebook\WebDriver\Exception\WebDriverCurlException;
 use Facebook\WebDriver\Interactions\WebDriverActions;
 use Facebook\WebDriver\Remote\LocalFileDetector;
 use Facebook\WebDriver\Remote\RemoteWebDriver;
-use Facebook\WebDriver\Remote\RemoteWebElement;
 use Facebook\WebDriver\Remote\UselessFileDetector;
+use Facebook\WebDriver\Remote\RemoteWebElement;
 use Facebook\WebDriver\Remote\WebDriverCapabilityType;
 use Facebook\WebDriver\WebDriverBy;
 use Facebook\WebDriver\WebDriverDimension;
@@ -341,18 +340,6 @@ class WebDriver extends CodeceptionModule implements
         return ['Facebook\WebDriver\Remote\RemoteWebDriver' => '"facebook/webdriver": "^1.0.1"'];
     }
 
-    /**
-     * @return RemoteWebElement
-     * @throws ModuleException
-     */
-    protected function getBaseElement()
-    {
-        if (!$this->baseElement) {
-            throw new ModuleException($this, "Page not loaded. Use `\$I->amOnPage` (or hidden API methods `_request` and `_loadPage`) to open it");
-        }
-        return $this->baseElement;
-    }
-
     public function _initialize()
     {
         $this->wdHost = sprintf('%s://%s:%s%s', $this->config['protocol'], $this->config['host'], $this->config['port'], $this->config['path']);
@@ -398,16 +385,14 @@ class WebDriver extends CodeceptionModule implements
      * <?php // inside Helper\Acceptance
      * public function _before(TestInterface $test)
      * {
-     *      $name = $test->getMetadata()->getName();
+     *      $name = \Codeception\Test\Descriptor::getTestAsString($test->toString());
      *      $this->getModule('WebDriver')->_capabilities(function($currentCapabilities) use ($name) {
      *          $currentCapabilities['name'] = $name;
-     *          return $currentCapabilities;
+     *          return new DesiredCapabilities($currentCapabilities);
      *      });
      * }
      * ```
-     * In this case, please ensure that `\Helper\Acceptance` is loaded before WebDriver so new capabilities could be applied.
      *
-     * @api
      * @param \Closure $capabilityFunction
      */
     public function _capabilities(\Closure $capabilityFunction)
@@ -427,20 +412,10 @@ class WebDriver extends CodeceptionModule implements
         }
         $this->setBaseElement();
 
-        if (method_exists($this->webDriver, 'getCapabilities')) {
-            $browser = $this->webDriver->getCapabilities()->getBrowserName();
-            $capabilities = $this->webDriver->getCapabilities()->toArray();
-        } else {
-            //Used with facebook/php-webdriver <1.3.0 (usually on PHP 5.4)
-            $browser = $this->config['browser'];
-            $capabilities = $this->config['capabilities'];
-        }
-        $test->getMetadata()->setCurrent(
-            [
-                'browser'      => $browser,
-                'capabilities' => $capabilities,
-            ]
-        );
+        $test->getMetadata()->setCurrent([
+            'browser' => $this->webDriver->getCapabilities()->getBrowserName(),
+            'capabilities' => $this->webDriver->getCapabilities()->toArray()
+        ]);
     }
 
     /**
@@ -514,7 +489,7 @@ class WebDriver extends CodeceptionModule implements
     public function _failed(TestInterface $test, $fail)
     {
         $this->debugWebDriverLogs($test);
-        $filename = preg_replace('~\W~', '.', Descriptor::getTestSignatureUnique($test));
+        $filename = preg_replace('~\W~', '.', Descriptor::getTestSignature($test));
         $outputDir = codecept_output_dir();
         $this->_saveScreenshot($report = $outputDir . mb_strcut($filename, 0, 245, 'utf-8') . '.fail.png');
         $test->getMetadata()->addReport('png', $report);
@@ -615,11 +590,11 @@ class WebDriver extends CodeceptionModule implements
     protected function isJSError($logEntryLevel, $message)
     {
         return
-            (
-                ($this->isPhantom() && $logEntryLevel != 'INFO')          // phantomjs logs errors as "WARNING"
-                || $logEntryLevel === 'SEVERE'                            // other browsers log errors as "SEVERE"
-            )
-            && strpos($message, 'ERR_PROXY_CONNECTION_FAILED') === false;  // ignore blackhole proxy
+        (
+            ($this->isPhantom() && $logEntryLevel != 'INFO')          // phantomjs logs errors as "WARNING"
+            || $logEntryLevel === 'SEVERE'                            // other browsers log errors as "SEVERE"
+        )
+        && strpos($message, 'ERR_PROXY_CONNECTION_FAILED') === false;  // ignore blackhole proxy
     }
 
     public function _afterSuite()
@@ -694,7 +669,7 @@ class WebDriver extends CodeceptionModule implements
     public function _getCurrentUri()
     {
         $url = $this->webDriver->getCurrentURL();
-        if ($url == 'about:blank' || strpos($url, 'data:') === 0) {
+        if ($url == 'about:blank') {
             throw new ModuleException($this, 'Current url is blank, no page was opened');
         }
         return Uri::retrieveUri($url);
@@ -1026,7 +1001,7 @@ class WebDriver extends CodeceptionModule implements
             ".//input[./@type = 'image'][contains(./@alt, $locator)]",
             ".//button[contains(normalize-space(string(.)), $locator)]",
             ".//input[./@type = 'submit' or ./@type = 'image' or ./@type = 'button'][./@name = $locator]",
-            ".//button[./@name = $locator or ./@title = $locator]"
+            ".//button[./@name = $locator]"
         );
 
         $els = $page->findElements(WebDriverBy::xpath($xpath));
@@ -1059,10 +1034,10 @@ class WebDriver extends CodeceptionModule implements
         $locator = Crawler::xpathLiteral(trim($selector));
         // by text or label
         $xpath = Locator::combine(
-        // @codingStandardsIgnoreStart
+            // @codingStandardsIgnoreStart
             ".//*[self::input | self::textarea | self::select][not(./@type = 'submit' or ./@type = 'image' or ./@type = 'hidden')][(((./@name = $locator) or ./@id = //label[contains(normalize-space(string(.)), $locator)]/@for) or ./@placeholder = $locator)]",
             ".//label[contains(normalize-space(string(.)), $locator)]//.//*[self::input | self::textarea | self::select][not(./@type = 'submit' or ./@type = 'image' or ./@type = 'hidden')]"
-        // @codingStandardsIgnoreEnd
+            // @codingStandardsIgnoreEnd
         );
         $fields = $this->webDriver->findElements(WebDriverBy::xpath($xpath));
         if (!empty($fields)) {
@@ -1099,7 +1074,7 @@ class WebDriver extends CodeceptionModule implements
     public function seeLink($text, $url = null)
     {
         $this->enableImplicitWait();
-        $nodes = $this->getBaseElement()->findElements(WebDriverBy::partialLinkText($text));
+        $nodes = $this->baseElement->findElements(WebDriverBy::partialLinkText($text));
         $this->disableImplicitWait();
         $currentUri = $this->_getCurrentUri();
 
@@ -1114,7 +1089,7 @@ class WebDriver extends CodeceptionModule implements
 
     public function dontSeeLink($text, $url = null)
     {
-        $nodes = $this->getBaseElement()->findElements(WebDriverBy::partialLinkText($text));
+        $nodes = $this->baseElement->findElements(WebDriverBy::partialLinkText($text));
         $currentUri = $this->_getCurrentUri();
         if (!$url) {
             $this->assertEmpty($nodes, "Link containing text '$text' was found in page $currentUri");
@@ -1225,57 +1200,27 @@ class WebDriver extends CodeceptionModule implements
 
     protected function proceedSeeInFormFields($formSelector, array $params, $assertNot)
     {
-        $form = $this->match($this->getBaseElement(), $formSelector);
+        $form = $this->match($this->baseElement, $formSelector);
         if (empty($form)) {
             throw new ElementNotFound($formSelector, "Form via CSS or XPath");
         }
         $form = reset($form);
-
-        $els = [];
         foreach ($params as $name => $values) {
-            $this->pushFormField($els, $form, $name, $values);
-        }
-
-        foreach ($els as $arrayElement) {
-            list($el, $values) = $arrayElement;
-
+            $els = $form->findElements(WebDriverBy::name($name));
+            if (empty($els)) {
+                throw new ElementNotFound($name);
+            }
             if (!is_array($values)) {
                 $values = [$values];
             }
-
             foreach ($values as $value) {
-                $ret = $this->proceedSeeInField($el, $value);
+                $ret = $this->proceedSeeInField($els, $value);
                 if ($assertNot) {
                     $this->assertNot($ret);
                 } else {
                     $this->assert($ret);
                 }
             }
-        }
-    }
-
-    /**
-     * Map an array element passed to seeInFormFields to its corresponding WebDriver element,
-     * recursing through array values if the field is not found.
-     *
-     * @param array $els The previously found elements.
-     * @param RemoteWebElement $form The form in which to search for fields.
-     * @param string $name The field's name.
-     * @param mixed $values
-     * @return void
-     */
-    protected function pushFormField(&$els, $form, $name, $values)
-    {
-        $el = $form->findElements(WebDriverBy::name($name));
-
-        if ($el) {
-            $els[] = [$el, $values];
-        } elseif (is_array($values)) {
-            foreach ($values as $key => $value) {
-                $this->pushFormField($els, $form, "{$name}[$key]", $value);
-            }
-        } else {
-            throw new ElementNotFound($name);
         }
     }
 
@@ -1552,7 +1497,7 @@ class WebDriver extends CodeceptionModule implements
         }
 
         if (is_array($radioOrCheckbox) or ($radioOrCheckbox instanceof WebDriverBy)) {
-            return $this->matchFirstOrFail($this->getBaseElement(), $radioOrCheckbox);
+            return $this->matchFirstOrFail($this->baseElement, $radioOrCheckbox);
         }
 
         $locator = Crawler::xpathLiteral($radioOrCheckbox);
@@ -1565,7 +1510,7 @@ class WebDriver extends CodeceptionModule implements
             $typeLiteral = Crawler::xPathLiteral($contextType);
             $inputLocatorFragment = "input[@type = $typeLiteral][@name = $nameLiteral]";
             $xpath = Locator::combine(
-            // @codingStandardsIgnoreStart
+                // @codingStandardsIgnoreStart
                 "ancestor::form//{$inputLocatorFragment}[(@id = ancestor::form//label[contains(normalize-space(string(.)), $locator)]/@for) or @placeholder = $locator]",
                 // @codingStandardsIgnoreEnd
                 "ancestor::form//label[contains(normalize-space(string(.)), $locator)]//{$inputLocatorFragment}"
@@ -1575,7 +1520,7 @@ class WebDriver extends CodeceptionModule implements
             }
         } else {
             $xpath = Locator::combine(
-            // @codingStandardsIgnoreStart
+                // @codingStandardsIgnoreStart
                 "//input[@type = 'checkbox' or @type = 'radio'][(@id = //label[contains(normalize-space(string(.)), $locator)]/@for) or @placeholder = $locator or @name = $locator]",
                 // @codingStandardsIgnoreEnd
                 "//label[contains(normalize-space(string(.)), $locator)]//input[@type = 'radio' or @type = 'checkbox']"
@@ -1622,7 +1567,7 @@ class WebDriver extends CodeceptionModule implements
 
     public function uncheckOption($option)
     {
-        $field = $this->findCheckable($this->getBaseElement(), $option);
+        $field = $this->findCheckable($this->baseElement, $option);
         if (!$field) {
             throw new ElementNotFound($option, "Checkbox by Label or CSS or XPath");
         }
@@ -1636,23 +1581,7 @@ class WebDriver extends CodeceptionModule implements
     {
         $el = $this->findField($field);
         $el->clear();
-        $el->sendKeys((string)$value);
-    }
-
-    /**
-     * Clears given field which isn't empty.
-     *
-     * ``` php
-     * <?php
-     * $I->clearField('#username');
-     * ```
-     *
-     * @param $field
-     */
-    public function clearField($field)
-    {
-        $el = $this->findField($field);
-        $el->clear();
+        $el->sendKeys($value);
     }
 
     public function attachFile($field, $filename)
@@ -1683,10 +1612,10 @@ class WebDriver extends CodeceptionModule implements
      */
     protected function getVisibleText()
     {
-        if ($this->getBaseElement() instanceof RemoteWebElement) {
-            return $this->getBaseElement()->getText();
+        if ($this->baseElement instanceof RemoteWebElement) {
+            return $this->baseElement->getText();
         }
-        $els = $this->getBaseElement()->findElements(WebDriverBy::cssSelector('body'));
+        $els = $this->baseElement->findElements(WebDriverBy::cssSelector('body'));
         if (isset($els[0])) {
             return $els[0]->getText();
         }
@@ -1695,7 +1624,7 @@ class WebDriver extends CodeceptionModule implements
 
     public function grabTextFrom($cssOrXPathOrRegex)
     {
-        $els = $this->match($this->getBaseElement(), $cssOrXPathOrRegex, false);
+        $els = $this->match($this->baseElement, $cssOrXPathOrRegex, false);
         if (count($els)) {
             return $els[0]->getText();
         }
@@ -1707,7 +1636,7 @@ class WebDriver extends CodeceptionModule implements
 
     public function grabAttributeFrom($cssOrXpath, $attribute)
     {
-        $el = $this->matchFirstOrFail($this->getBaseElement(), $cssOrXpath);
+        $el = $this->matchFirstOrFail($this->baseElement, $cssOrXpath);
         return $el->getAttribute($attribute);
     }
 
@@ -1724,7 +1653,7 @@ class WebDriver extends CodeceptionModule implements
 
     public function grabMultiple($cssOrXpath, $attribute = null)
     {
-        $els = $this->match($this->getBaseElement(), $cssOrXpath);
+        $els = $this->match($this->baseElement, $cssOrXpath);
         return array_map(
             function (WebDriverElement $e) use ($attribute) {
                 if ($attribute) {
@@ -1781,7 +1710,7 @@ class WebDriver extends CodeceptionModule implements
     public function seeElementInDOM($selector, $attributes = [])
     {
         $this->enableImplicitWait();
-        $els = $this->match($this->getBaseElement(), $selector);
+        $els = $this->match($this->baseElement, $selector);
         $els = $this->filterByAttributes($els, $attributes);
         $this->disableImplicitWait();
         $this->assertNotEmpty($els);
@@ -1796,7 +1725,7 @@ class WebDriver extends CodeceptionModule implements
      */
     public function dontSeeElementInDOM($selector, $attributes = [])
     {
-        $els = $this->match($this->getBaseElement(), $selector);
+        $els = $this->match($this->baseElement, $selector);
         $els = $this->filterByAttributes($els, $attributes);
         $this->assertEmpty($els);
     }
@@ -1821,7 +1750,7 @@ class WebDriver extends CodeceptionModule implements
 
     public function seeNumberOfElementsInDOM($selector, $expected)
     {
-        $counted = count($this->match($this->getBaseElement(), $selector));
+        $counted = count($this->match($this->baseElement, $selector));
         if (is_array($expected)) {
             list($floor, $ceil) = $expected;
             $this->assertTrue(
@@ -1931,29 +1860,7 @@ class WebDriver extends CodeceptionModule implements
         $alert = $this->webDriver->switchTo()->alert();
         try {
             $this->assertContains($text, $alert->getText());
-        } catch (\PHPUnit\Framework\AssertionFailedError $e) {
-            $alert->dismiss();
-            throw $e;
-        }
-    }
-
-    /**
-     * Checks that the active JavaScript popup,
-     * as created by `window.alert`|`window.confirm`|`window.prompt`, does NOT contain the given string.
-     *
-     * @param $text
-     *
-     * @throws \Codeception\Exception\ModuleException
-     */
-    public function dontSeeInPopup($text)
-    {
-        if ($this->isPhantom()) {
-            throw new ModuleException($this, 'PhantomJS does not support working with popups');
-        }
-        $alert = $this->webDriver->switchTo()->alert();
-        try {
-            $this->assertNotContains($text, $alert->getText());
-        } catch (\PHPUnit\Framework\AssertionFailedError $e) {
+        } catch (\PHPUnit_Framework_AssertionFailedError $e) {
             $alert->dismiss();
             throw $e;
         }
@@ -2169,7 +2076,7 @@ class WebDriver extends CodeceptionModule implements
      */
     public function submitForm($selector, array $params, $button = null)
     {
-        $form = $this->matchFirstOrFail($this->getBaseElement(), $selector);
+        $form = $this->matchFirstOrFail($this->baseElement, $selector);
 
         $fields = $form->findElements(
             WebDriverBy::cssSelector('input:enabled,textarea:enabled,select:enabled,input[type=hidden]')
@@ -2267,7 +2174,7 @@ class WebDriver extends CodeceptionModule implements
      */
     public function waitForElementChange($element, \Closure $callback, $timeout = 30)
     {
-        $el = $this->matchFirstOrFail($this->getBaseElement(), $element);
+        $el = $this->matchFirstOrFail($this->baseElement, $element);
         $checker = function () use ($el, $callback) {
             return $callback($el);
         };
@@ -2375,7 +2282,7 @@ class WebDriver extends CodeceptionModule implements
     /**
      * Wait for $timeout seconds.
      *
-     * @param int|float $timeout secs
+     * @param int $timeout secs
      * @throws \Codeception\Exception\TestRuntimeException
      */
     public function wait($timeout)
@@ -2387,7 +2294,7 @@ class WebDriver extends CodeceptionModule implements
                 Please note that wait method accepts number of seconds as parameter."
             );
         }
-        usleep($timeout * 1000000);
+        sleep($timeout);
     }
 
     /**
@@ -2517,42 +2424,15 @@ class WebDriver extends CodeceptionModule implements
      * ```php
      * <?php
      * $myVar = $I->executeJS('return $("#myField").val()');
-     *
-     * // additional arguments can be passed as array
-     * // Example shows `Hello World` alert:
-     * $I->executeJS("window.alert(arguments[0])", ['Hello world']);
+     * ?>
      * ```
      *
      * @param $script
-     * @param array $arguments
      * @return mixed
      */
-    public function executeJS($script, array $arguments = [])
+    public function executeJS($script)
     {
-        return $this->webDriver->executeScript($script, $arguments);
-    }
-
-    /**
-     * Executes asynchronous JavaScript.
-     * A callback should be executed by JavaScript to exit from a script.
-     * Callback is passed as a last element in `arguments` array.
-     * Additional arguments can be passed as array in second parameter.
-     *
-     * ```js
-     * // wait for 1200 milliseconds my running `setTimeout`
-     * * $I->executeAsyncJS('setTimeout(arguments[0], 1200)');
-     *
-     * $seconds = 1200; // or seconds are passed as argument
-     * $I->executeAsyncJS('setTimeout(arguments[1], arguments[0])', [$seconds]);
-     * ```
-     *
-     * @param $script
-     * @param array $arguments
-     * @return mixed
-     */
-    public function executeAsyncJS($script, array $arguments = [])
-    {
-        return $this->webDriver->executeAsyncScript($script, $arguments);
+        return $this->webDriver->executeScript($script);
     }
 
     /**
@@ -2577,8 +2457,8 @@ class WebDriver extends CodeceptionModule implements
      */
     public function dragAndDrop($source, $target)
     {
-        $snodes = $this->matchFirstOrFail($this->getBaseElement(), $source);
-        $tnodes = $this->matchFirstOrFail($this->getBaseElement(), $target);
+        $snodes = $this->matchFirstOrFail($this->baseElement, $source);
+        $tnodes = $this->matchFirstOrFail($this->baseElement, $target);
 
         $action = new WebDriverActions($this->webDriver);
         $action->dragAndDrop($snodes, $tnodes)->perform();
@@ -2609,7 +2489,7 @@ class WebDriver extends CodeceptionModule implements
     {
         $where = null;
         if (null !== $cssOrXPath) {
-            $el = $this->matchFirstOrFail($this->getBaseElement(), $cssOrXPath);
+            $el = $this->matchFirstOrFail($this->baseElement, $cssOrXPath);
             $where = $el->getCoordinates();
         }
 
@@ -2659,8 +2539,8 @@ class WebDriver extends CodeceptionModule implements
      * ```
      *
      * @param string $cssOrXPath css or xpath of the web element (body by default).
-     * @param int $offsetX
-     * @param int $offsetY
+     * @param int    $offsetX
+     * @param int    $offsetY
      *
      * @throws \Codeception\Exception\ElementNotFound
      */
@@ -2690,7 +2570,7 @@ class WebDriver extends CodeceptionModule implements
      */
     public function doubleClick($cssOrXPath)
     {
-        $el = $this->matchFirstOrFail($this->getBaseElement(), $cssOrXPath);
+        $el = $this->matchFirstOrFail($this->baseElement, $cssOrXPath);
         $this->webDriver->getMouse()->doubleClick($el->getCoordinates());
     }
 
@@ -2711,7 +2591,7 @@ class WebDriver extends CodeceptionModule implements
                 if ($this->isPhantom() and $e->getResults()['status'] == 12) {
                     throw new MalformedLocatorException(
                         key($selector) . ' => ' . reset($selector),
-                        "Strict locator " . $e->getCode()
+                        "Strict locator ".$e->getCode()
                     );
                 }
             }
@@ -2831,7 +2711,7 @@ class WebDriver extends CodeceptionModule implements
      */
     public function pressKey($element, $char)
     {
-        $el = $this->matchFirstOrFail($this->getBaseElement(), $element);
+        $el = $this->matchFirstOrFail($this->baseElement, $element);
         $args = func_get_args();
         array_shift($args);
         $keys = [];
@@ -2966,7 +2846,7 @@ class WebDriver extends CodeceptionModule implements
 
                 if ($type == 'checkbox') {
                     //Find by value or css,id,xpath
-                    $field = $this->findCheckable($this->getBaseElement(), $value, true);
+                    $field = $this->findCheckable($this->baseElement, $value, true);
                     if (!$field) {
                         throw new ElementNotFound($value, "Checkbox or Radio by Label or CSS or XPath");
                     }
@@ -2978,10 +2858,10 @@ class WebDriver extends CodeceptionModule implements
                 } elseif ($type == 'radio') {
                     $this->selectOption($field, $value);
                     return;
+                } else {
+                    $el->sendKeys($value);
+                    return;
                 }
-
-                $el->sendKeys($value);
-                return;
         }
 
         throw new ElementNotFound($field, "Field by name, label, CSS or XPath");
@@ -2993,7 +2873,7 @@ class WebDriver extends CodeceptionModule implements
      */
     protected function matchVisible($selector)
     {
-        $els = $this->match($this->getBaseElement(), $selector);
+        $els = $this->match($this->baseElement, $selector);
         $nodes = array_filter(
             $els,
             function (WebDriverElement $el) {
@@ -3057,7 +2937,6 @@ class WebDriver extends CodeceptionModule implements
         if (!isset($this->sessionSnapshots[$name])) {
             return false;
         }
-        $this->webDriver->manage()->deleteAllCookies();
         foreach ($this->sessionSnapshots[$name] as $cookie) {
             $this->webDriver->manage()->addCookie($cookie);
         }
@@ -3108,7 +2987,7 @@ class WebDriver extends CodeceptionModule implements
      */
     public function scrollTo($selector, $offsetX = null, $offsetY = null)
     {
-        $el = $this->matchFirstOrFail($this->getBaseElement(), $selector);
+        $el = $this->matchFirstOrFail($this->baseElement, $selector);
         $x = $el->getLocation()->getX() + $offsetX;
         $y = $el->getLocation()->getY() + $offsetY;
         $this->webDriver->executeScript("window.scrollTo($x, $y)");
@@ -3251,7 +3130,7 @@ class WebDriver extends CodeceptionModule implements
     {
         $this->waitForElement($element, $timeout);
         $this->setBaseElement($element);
-        $this->debugSection('InnerText', $this->getBaseElement()->getText());
+        $this->debugSection('InnerText', $this->baseElement->getText());
 
         if (is_callable($actions)) {
             $actions($this);

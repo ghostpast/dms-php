@@ -110,7 +110,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
      * ```
      *
      * @param string $exchange
-     * @param string|\PhpAmqpLib\Message\AMQPMessage $message
+     * @param string|AMQPMessage $message
      * @param string $routing_key
      */
     public function pushToExchange($exchange, $message, $routing_key = null)
@@ -132,7 +132,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
      * ```
      *
      * @param string $queue
-     * @param string|\PhpAmqpLib\Message\AMQPMessage $message
+     * @param string|AMQPMessage $message
      */
     public function pushToQueue($queue, $message)
     {
@@ -315,7 +315,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
      * ```
      *
      * @param string $queue
-     * @return \PhpAmqpLib\Message\AMQPMessage
+     * @return AMQPMessage
      */
     public function grabMessageFromQueue($queue)
     {
@@ -358,7 +358,7 @@ class AMQP extends CodeceptionModule implements RequiresPackage
     }
 
     /**
-     * @return \PhpAmqpLib\Channel\AMQPChannel
+     * @return AMQPChannel
      */
     protected function getChannel()
     {

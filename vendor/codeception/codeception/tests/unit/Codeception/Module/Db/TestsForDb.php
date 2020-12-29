@@ -156,6 +156,7 @@ abstract class TestsForDb extends \Codeception\Test\Unit
         $this->assertEquals($num, 0);
     }
 
+
     public function testLoadWithPopulator()
     {
         $this->module->_cleanup();
@@ -189,18 +190,6 @@ abstract class TestsForDb extends \Codeception\Test\Unit
         $this->module->seeInDatabase('users', ['name' => 'user1']);
         
         $this->module->updateInDatabase('users', ['name' => 'davert'], ['name' => 'user1']);
-    }
-
-    public function testInsertInDatabase()
-    {
-        $testData = ['status' => 'test'];
-        $this->module->_insertInDatabase('no_pk', $testData);
-        $this->module->seeInDatabase('no_pk', $testData);
-        $this->module->_reconfigure(['cleanup' => false]);
-        $this->module->_after(\Codeception\Util\Stub::makeEmpty('\Codeception\TestInterface'));
-
-        $this->module->_before(\Codeception\Util\Stub::makeEmpty('\Codeception\TestInterface'));
-        $this->module->seeInDatabase('no_pk', $testData);
     }
 
 }

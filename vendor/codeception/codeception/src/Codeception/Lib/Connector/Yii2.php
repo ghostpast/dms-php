@@ -2,16 +2,14 @@
 namespace Codeception\Lib\Connector;
 
 use Codeception\Lib\Connector\Yii2\Logger;
-use Codeception\Lib\InnerBrowser;
+use Codeception\Lib\Connector\Yii2\TestMailer;
 use Codeception\Util\Debug;
 use Symfony\Component\BrowserKit\Client;
 use Symfony\Component\BrowserKit\Cookie;
 use Symfony\Component\BrowserKit\Response;
 use Yii;
 use yii\base\ExitException;
-use yii\base\Security;
 use yii\web\HttpException;
-use yii\web\Request;
 use yii\web\Response as YiiResponse;
 
 class Yii2 extends Client
@@ -23,41 +21,63 @@ class Yii2 extends Client
      */
     public $configFile;
 
+    public $defaultServerVars = [];
+
+    /**
+     * @var array
+     */
+    public $headers;
+    public $statusCode;
+
+    /**
+     * @var \yii\web\Application
+     */
+    private $app;
+
+    /**
+     * @var \yii\db\Connection
+     */
+    public static $db; // remember the db instance
+
+    /**
+     * @var TestMailer
+     */
+    public static $mailer;
+
     /**
      * @return \yii\web\Application
      */
     public function getApplication()
     {
-        if (!isset(Yii::$app)) {
+        if (!isset($this->app)) {
             $this->startApp();
         }
-        return Yii::$app;
+        return $this->app;
     }
 
     public function resetApplication()
     {
-        codecept_debug('Destroying application');
-        Yii::$app = null;
-        \yii\web\UploadedFile::reset();
-        if (method_exists(\yii\base\Event::className(), 'offAll')) {
-            \yii\base\Event::offAll();
-        }
-        Yii::setLogger(null);
+        $this->app = null;
     }
 
     public function startApp()
     {
-        codecept_debug('Starting application');
         $config = require($this->configFile);
         if (!isset($config['class'])) {
             $config['class'] = 'yii\web\Application';
         }
-
-        $config = $this->mockMailer($config);
         /** @var \yii\web\Application $app */
-        Yii::$app = Yii::createObject($config);
+        $this->app = Yii::createObject($config);
+        $this->persistDb();
+        $this->mockMailer($config);
+        \Yii::setLogger(new Logger());
+    }
 
-        Yii::setLogger(new Logger());
+    public function resetPersistentVars()
+    {
+        static::$db = null;
+        static::$mailer = null;
+        \yii\web\UploadedFile::reset();
     }
 
     /**
@@ -70,6 +90,7 @@ class Yii2 extends Client
     {
         $_COOKIE = $request->getCookies();
         $_SERVER = $request->getServer();
+        $this->restoreServerVars();
         $_FILES = $this->remapFiles($request->getFiles());
         $_REQUEST = $this->remapRequestParameters($request->getParameters());
         $_POST = $_GET = [];
@@ -94,27 +115,17 @@ class Yii2 extends Client
 
         $app = $this->getApplication();
 
-        /**
-         * Just before the request we set the response object so it is always fresh.
-         * @todo Implement some kind of check to see if someone tried to change the objects' properties and expects
-         * those changes to be reflected in the reponse.
-         */
-        $app->set('response', $app->getComponents()['response']);
+        $app->getResponse()->on(YiiResponse::EVENT_AFTER_PREPARE, [$this, 'processResponse']);
 
         // disabling logging. Logs are slowing test execution down
         foreach ($app->log->targets as $target) {
             $target->enabled = false;
         }
 
-        ob_start();
+        $this->headers    = [];
+        $this->statusCode = null;
 
-        // recreating request object to reset headers and cookies collections
-        /**
-         * Just before the request we set the request object so it is always fresh.
-         * @todo Implement some kind of check to see if someone tried to change the objects' properties and expects
-         * those changes to be reflected in the reponse.
-         */
-        $app->set('request', $app->getComponents()['request']);
+        ob_start();
 
         $yiiRequest = $app->getRequest();
         if ($request->getContent() !== null) {
@@ -127,23 +138,17 @@ class Yii2 extends Client
         $yiiRequest->setQueryParams($_GET);
 
         try {
-            /*
-             * This is basically equivalent to $app->run() without sending the response.
-             * Sending the response is problematic because it tries to send headers.
-             */
             $app->trigger($app::EVENT_BEFORE_REQUEST);
-            $response = $app->handleRequest($yiiRequest);
+
+            $app->handleRequest($yiiRequest)->send();
+
             $app->trigger($app::EVENT_AFTER_REQUEST);
-            codecept_debug($response->isSent);
-            $response->send();
         } catch (\Exception $e) {
             if ($e instanceof HttpException) {
                 // Don't discard output and pass exception handling to Yii to be able
                 // to expect error response codes in tests.
                 $app->errorHandler->discardExistingOutput = false;
                 $app->errorHandler->handleException($e);
-                $response = $app->response;
-
             } elseif (!$e instanceof ExitException) {
                 // for exceptions not related to Http, we pass them to Codeception
                 $this->resetApplication();
@@ -151,18 +156,17 @@ class Yii2 extends Client
             }
         }
 
-        $this->encodeCookies($response, $yiiRequest, $app->security);
-
-        if ($response->isRedirection) {
-            Debug::debug("[Redirect with headers]" . print_r($response->getHeaders()->toArray(), true));
-        }
-
         $content = ob_get_clean();
-        if (empty($content) && !empty($response->content)) {
-            throw new \Exception('No content was sent from Yii application');
+
+        // catch "location" header and display it in debug, otherwise it would be handled
+        // by symfony browser-kit and not displayed.
+        if (isset($this->headers['location'])) {
+            Debug::debug("[Headers] " . json_encode($this->headers));
         }
 
-        return new Response($content, $response->statusCode, $response->getHeaders()->toArray());
+        $this->resetApplication();
+
+        return new Response($content, $this->statusCode, $this->headers);
     }
 
     protected function revertErrorHandler()
@@ -172,28 +176,36 @@ class Yii2 extends Client
     }
 
 
-    /**
-     * Encodes the cookies and adds them to the headers.
-     * @param \yii\web\Response $response
-     * @throws \yii\base\InvalidConfigException
-     */
-    protected function encodeCookies(
-        YiiResponse $response,
-        Request $request,
-        Security $security
-    ) {
+    public function restoreServerVars()
+    {
+        $this->server = $this->defaultServerVars;
+        foreach ($this->server as $key => $value) {
+            $_SERVER[$key] = $value;
+        }
+    }
+
+    public function processResponse($event)
+    {
+        /** @var \yii\web\Response $response */
+        $response = $event->sender;
+        $request = Yii::$app->getRequest();
+        $this->headers = $response->getHeaders()->toArray();
+        $response->getHeaders()->removeAll();
+        $this->statusCode = $response->getStatusCode();
+        $cookies = $response->getCookies();
+
         if ($request->enableCookieValidation) {
             $validationKey = $request->cookieValidationKey;
         }
 
-        foreach ($response->getCookies() as $cookie) {
+        foreach ($cookies as $cookie) {
             /** @var \yii\web\Cookie $cookie */
             $value = $cookie->value;
             if ($cookie->expire != 1 && isset($validationKey)) {
                 $data = version_compare(Yii::getVersion(), '2.0.2', '>')
                     ? [$cookie->name, $cookie->value]
                     : $cookie->value;
-                $value = $security->hashData(serialize($data), $validationKey);
+                $value = Yii::$app->security->hashData(serialize($data), $validationKey);
             }
             $c = new Cookie(
                 $cookie->name,
@@ -206,15 +218,21 @@ class Yii2 extends Client
             );
             $this->getCookieJar()->set($c);
         }
+        $cookies->removeAll();
     }
 
     /**
      * Replace mailer with in memory mailer
-     * @param array $config Original configuration
-     * @return array New configuration
+     * @param $config
+     * @param $app
      */
-    protected function mockMailer(array $config)
+    protected function mockMailer($config)
     {
+        if (static::$mailer) {
+            $this->app->set('mailer', static::$mailer);
+            return;
+        }
+
         // options that make sense for mailer mock
         $allowedOptions = [
             'htmlLayout',
@@ -239,24 +257,21 @@ class Yii2 extends Client
                 }
             }
         }
-        $config['components']['mailer'] = $mailerConfig;
 
-        return $config;
+        $this->app->set('mailer', $mailerConfig);
+        static::$mailer = $this->app->get('mailer');
     }
 
     /**
-     * A new client is created for every test, it is destroyed after every test.
-     * @see InnerBrowser::_after()
-     *
+     * @param $app
      */
-    public function __destruct()
+    protected function persistDb()
     {
-        $this->resetApplication();
-    }
-
-    public function restart()
-    {
-        parent::restart();
-        $this->resetApplication();
+        // always use the same DB connection
+        if (static::$db) {
+            $this->app->set('db', static::$db);
+        } elseif ($this->app->has('db')) {
+            static::$db = $this->app->get('db');
+        }
     }
 }
